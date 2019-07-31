@@ -20,9 +20,10 @@ typedef struct {
 */
 void img_destroy(IMG *img)
 {
-	for (int row = 0; row < img->height; ++row)
-		free(img->pixels[row]);
+	for (int col = 0; col < img->width; ++col)
+		free(img->pixels[col]);
 	free(img->pixels);
+	free(img);
 }
 
 /* Creates an empty pixel array of size width*height.
@@ -40,10 +41,12 @@ IMG *img_init(unsigned int w, unsigned int h)
 	img->height = h;
 
 	img->pixels = (BYTE **) malloc(sizeof(BYTE *) * w);
-	if (img->pixels == NULL)
+	if (img->pixels == NULL) {
+		free(img);
 		return NULL;
+	}
 
-	for (int col = 0; col < h; ++col) {
+	for (int col = 0; col < w; ++col) {
 		img->pixels[col] = (BYTE *) calloc(h, sizeof(BYTE));
 		if (img->pixels[col] == NULL) {
 			img_destroy(img);
@@ -56,12 +59,12 @@ IMG *img_init(unsigned int w, unsigned int h)
 // Dumps the pixel data to stdout
 void img_dump(IMG *img)
 {
-  for (int y = 0; y < img->height; ++y) {
-    for (int x = 0; x < img->width; ++x)
-      printf("%hhu ", img->pixels[x][y]);
-    printf("\n");
-  }
-  printf("width: %u, height: %u\n", img->width, img->height);
+	for (int y = 0; y < img->height; ++y) {
+		for (int x = 0; x < img->width; ++x)
+			printf("%hhu ", img->pixels[x][y]);
+		printf("\n");
+	}
+	printf("width: %u, height: %u\n", img->width, img->height);
 }
 
 /* Determines if given string ends with given ending.
@@ -90,15 +93,15 @@ int ends_with(const char *str, const char *end)
 */
 char get_shade(BYTE b)
 {
-  if (0 <= b && b < 50) {
-    return '#';
-  } else if (50 <= b && b < 100) {
-    return 'm';
-  } else if (100 <= b && b < 200) {
-    return 'o';
-  } else {
-    return ' ';
-  }
+	if (0 <= b && b < 50) {
+		return '#';
+	} else if (50 <= b && b < 100) {
+		return 'm';
+	} else if (100 <= b && b < 200) {
+		return 'o';
+	} else {
+		return ' ';
+	}
 }
 
 int main(int argc, char **argv)
@@ -144,13 +147,13 @@ int main(int argc, char **argv)
 		JSAMPARRAY scanline = (JSAMPARRAY) malloc(sizeof(JSAMPROW)); // Temp array for scanlines
 		*scanline = (JSAMPROW) malloc(sizeof(JSAMPLE) * img_width * cinfo.output_components);
 
-    image = img_init (img_width, img_height); // Final grayscale image
+		image = img_init (img_width, img_height); // Final grayscale image
 
 		// Read scanlines & convert to grayscale
-    int y = 0;
+		int y = 0;
 		while (cinfo.output_scanline < img_height) {
 			jpeg_read_scanlines(&cinfo, scanline, 1);
-      for (int x = 0; x < img_width; ++x) {
+				for (int x = 0; x < img_width; ++x) {
         int p = x * 3;
         BYTE R = (*scanline)[p];
         BYTE G = (*scanline)[p + 1];
@@ -163,8 +166,8 @@ int main(int argc, char **argv)
     // Clean-up JPEG process
 		jpeg_finish_decompress(&cinfo);
 		jpeg_destroy_decompress(&cinfo);
-    free(*scanline);
-    free(scanline);
+  free(*scanline);
+  free(scanline);
 	} else {
     // TODO: Add support for PNG files
 	}
@@ -174,7 +177,7 @@ int main(int argc, char **argv)
 	FILE *outfile;
 	if ((outfile = fopen("out.txt", "w")) == NULL) {
 		img_destroy (image);
-    fprintf(stderr, "Unable to output `out.txt`\n");
+		fprintf(stderr, "Unable to output `out.txt`\n");
 		return 1;
 	}
 
@@ -187,7 +190,7 @@ int main(int argc, char **argv)
     fprintf(outfile, "\n");
   }
 
-  fclose(outfile);
-  img_destroy (image);
+	fclose(outfile);
+ img_destroy (image);
 	return 0;
 }
