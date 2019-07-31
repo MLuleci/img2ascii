@@ -153,25 +153,25 @@ int main(int argc, char **argv)
 		int y = 0;
 		while (cinfo.output_scanline < img_height) {
 			jpeg_read_scanlines(&cinfo, scanline, 1);
-				for (int x = 0; x < img_width; ++x) {
-        int p = x * 3;
-        BYTE R = (*scanline)[p];
-        BYTE G = (*scanline)[p + 1];
-        BYTE B = (*scanline)[p + 2];
-        image->pixels[x][y] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
-      }
-      ++y;
+			for (int x = 0; x < img_width; ++x) {
+				int p = x * 3;
+				BYTE R = (*scanline)[p];
+				BYTE G = (*scanline)[p + 1];
+				BYTE B = (*scanline)[p + 2];
+				image->pixels[x][y] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+			}
+			++y;
 		}
 
-    // Clean-up JPEG process
+		// Clean-up JPEG process
 		jpeg_finish_decompress(&cinfo);
 		jpeg_destroy_decompress(&cinfo);
-  free(*scanline);
-  free(scanline);
+		free(*scanline);
+		free(scanline);
 	} else {
-    // TODO: Add support for PNG files
+		// TODO: Add support for PNG files
 	}
-  fclose(infile);
+	fclose(infile);
 
 	// Test output file
 	FILE *outfile;
@@ -181,16 +181,16 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-  // Convert grayscale values to characters using shademap
-  for (int y = 0; y < image->height; ++y) {
-    for (int x = 0; x < image->width; ++x) {
-      char c = get_shade(image->pixels[x][y]);
-      fprintf(outfile, "%c", c); // Write to output
-    }
-    fprintf(outfile, "\n");
-  }
+	// Convert grayscale values to characters using shademap
+	for (int y = 0; y < image->height; ++y) {
+		for (int x = 0; x < image->width; ++x) {
+			char c = get_shade(image->pixels[x][y]);
+			fprintf(outfile, "%c", c); // Write to output
+		}
+		fprintf(outfile, "\n");
+	}
 
 	fclose(outfile);
- img_destroy (image);
+	img_destroy (image);
 	return 0;
 }
