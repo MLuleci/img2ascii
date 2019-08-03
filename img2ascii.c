@@ -16,12 +16,12 @@ typedef struct {
 } IMG;
 
 /* Frees the memory allocated for an image.
- * \param The image struct to be freed
+ * \param img The image struct to be freed
 */
 void img_destroy(IMG *img)
 {
-	for (int col = 0; col < img->width; ++col)
-		free(img->pixels[col]);
+	for (int row = 0; row < img->height; ++row)
+		free(img->pixels[row]);
 	free(img->pixels);
 	free(img);
 }
@@ -40,15 +40,15 @@ IMG *img_init(unsigned int w, unsigned int h)
 	img->width = w;
 	img->height = h;
 
-	img->pixels = (BYTE **) malloc(sizeof(BYTE *) * w);
+	img->pixels = (BYTE **) malloc(sizeof(BYTE *) * h);
 	if (img->pixels == NULL) {
 		free(img);
 		return NULL;
 	}
 
-	for (int col = 0; col < w; ++col) {
-		img->pixels[col] = (BYTE *) calloc(h, sizeof(BYTE));
-		if (img->pixels[col] == NULL) {
+	for (int row = 0; row < h; ++row) {
+		img->pixels[row] = (BYTE *) calloc(w, sizeof(BYTE));
+		if (img->pixels[row] == NULL) {
 			img_destroy(img);
 			return NULL;
 		}
@@ -56,12 +56,14 @@ IMG *img_init(unsigned int w, unsigned int h)
 	return img;
 }
 
-// Dumps the pixel data to stdout
+/* Dumps the pixel data to stdout.
+ * \param img The image being dumped
+*/
 void img_dump(IMG *img)
 {
 	for (int y = 0; y < img->height; ++y) {
 		for (int x = 0; x < img->width; ++x)
-			printf("%hhu ", img->pixels[x][y]);
+			printf("%hhu ", img->pixels[y][x]);
 		printf("\n");
 	}
 	printf("width: %u, height: %u\n", img->width, img->height);
@@ -86,9 +88,9 @@ int ends_with(const char *str, const char *end)
 	return 1;
 }
 
-/* Converts a grayscale pixel value to shading character
+/* Converts a grayscale pixel value to shading character.
  * TODO: Improve shading accuracy
- * \param Pixel value [0-255]
+ * \param b The pixel value in range [0-255]
  * \return Appropriate shading character
 */
 char get_shade(BYTE b)
@@ -127,6 +129,7 @@ int main(int argc, char **argv)
 	}
 
 	// Fetch image data
+	// TODO: Add checks to reject (or use) images already in grayscale
 	IMG *image;
 	if (is_jpg) {
 		// Initialize libjpeg structs
@@ -140,14 +143,14 @@ int main(int argc, char **argv)
 		jpeg_read_header(&cinfo, TRUE);
 		jpeg_start_decompress(&cinfo);
 
-		// Initialize arrays
+		// Get image data
 		unsigned int img_width = cinfo.output_width;
 		unsigned int img_height = cinfo.output_height;
 
+		// Create arrays
 		JSAMPARRAY scanline = (JSAMPARRAY) malloc(sizeof(JSAMPROW)); // Temp array for scanlines
 		*scanline = (JSAMPROW) malloc(sizeof(JSAMPLE) * img_width * cinfo.output_components);
-
-		image = img_init (img_width, img_height); // Final grayscale image
+		image = img_init(img_width, img_height); // Final grayscale image
 
 		// Read scanlines & convert to grayscale
 		int y = 0;
@@ -158,7 +161,7 @@ int main(int argc, char **argv)
 				BYTE R = (*scanline)[p];
 				BYTE G = (*scanline)[p + 1];
 				BYTE B = (*scanline)[p + 2];
-				image->pixels[x][y] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+				image->pixels[y][x] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
 			}
 			++y;
 		}
@@ -169,28 +172,74 @@ int main(int argc, char **argv)
 		free(*scanline);
 		free(scanline);
 	} else {
-		// TODO: Add support for PNG files
+		png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+		if (!png_ptr) {
+			png_destroy_read_struct(&png_ptr, NULL, NULL);
+		} else {
+			png_infop info_ptr = png_create_info_struct(png_ptr);
+			if (!info_ptr) {
+				png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+			} else {
+				// Passed all tests
+				png_init_io(png_ptr, infile);
+
+				// Get image data
+				png_read_info(png_ptr, info_ptr);
+				unsigned int color_type = png_get_color_type(png_ptr, info_ptr);
+				unsigned int bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+
+				// Test for correct image type
+				if (bit_depth == 8 && color_type & PNG_COLOR_TYPE_RGB) {
+					// Strip alpha channel if present
+					if (color_type & PNG_COLOR_MASK_ALPHA)
+						png_set_strip_alpha(png_ptr);
+
+					// Convert to grayscale :^)
+					png_set_rgb_to_gray_fixed(png_ptr, 1, -1, -1);
+
+					// Test for errors in the conversion
+					if (!png_get_rgb_to_gray_status(png_ptr)) {
+						png_read_update_info(png_ptr, info_ptr);
+
+						// Get image data (post-transforms)
+						unsigned int img_width = png_get_image_width(png_ptr, info_ptr);
+						unsigned int img_height = png_get_image_height(png_ptr, info_ptr);
+						unsigned int num_comp = png_get_rowbytes(png_ptr, info_ptr);
+
+						// Create arrays
+						image = img_init(img_width, img_height);
+
+						// Read image
+						png_read_image(png_ptr, image->pixels);
+
+						// Clean-up PNG process
+						png_read_end(png_ptr, NULL);
+						png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+					}
+				}
+			}
+		}
 	}
 	fclose(infile);
 
 	// Test output file
 	FILE *outfile;
 	if ((outfile = fopen("out.txt", "w")) == NULL) {
-		img_destroy (image);
+		img_destroy(image);
 		fprintf(stderr, "Unable to output `out.txt`\n");
 		return 1;
 	}
 
-	// Convert grayscale values to characters using shademap
+	// Convert grayscale values to characters
 	for (int y = 0; y < image->height; ++y) {
 		for (int x = 0; x < image->width; ++x) {
-			char c = get_shade(image->pixels[x][y]);
+			char c = get_shade(image->pixels[y][x]);
 			fprintf(outfile, "%c", c); // Write to output
 		}
 		fprintf(outfile, "\n");
 	}
 
 	fclose(outfile);
-	img_destroy (image);
+	img_destroy(image);
 	return 0;
 }

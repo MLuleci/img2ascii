@@ -1,6 +1,7 @@
 # Img2ASCII
-A program that converts any PNG or JPG/JPEG file into ASCII art and outputs the result as `out.txt`.
-Doesn't work with CMYK formatted JPEGs.
+A program that converts any PNG or JPG/JPEG image into ASCII art. 
+The output is placed in `out.txt`.
+Images must be in RGB or equivalent colour format.
 
 ## Dependencies
 - libjpeg ver. 8.0.0 or above
