@@ -129,7 +129,6 @@ int main(int argc, char **argv)
 	}
 
 	// Fetch image data
-	// TODO: Add checks to reject (or use) images already in grayscale
 	IMG *image;
 	if (is_jpg) {
 		// Initialize libjpeg structs
@@ -157,11 +156,15 @@ int main(int argc, char **argv)
 		while (cinfo.output_scanline < img_height) {
 			jpeg_read_scanlines(&cinfo, scanline, 1);
 			for (int x = 0; x < img_width; ++x) {
-				int p = x * 3;
-				BYTE R = (*scanline)[p];
-				BYTE G = (*scanline)[p + 1];
-				BYTE B = (*scanline)[p + 2];
-				image->pixels[y][x] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+				if (cinfo.out_color_space == JCS_GRAYSCALE && cinfo.output_components == 1) {
+					image->pixels[y][x] = (*scanline)[x];
+				} else {
+					int p = x * 3;
+					BYTE R = (*scanline)[p];
+					BYTE G = (*scanline)[p + 1];
+					BYTE B = (*scanline)[p + 2];
+					image->pixels[y][x] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+				}
 			}
 			++y;
 		}
@@ -175,10 +178,16 @@ int main(int argc, char **argv)
 		png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 		if (!png_ptr) {
 			png_destroy_read_struct(&png_ptr, NULL, NULL);
+			fclose(infile);
+			fprintf(stderr, "Internal error (png_destroy_read_struct)\n");
+			return 1;
 		} else {
 			png_infop info_ptr = png_create_info_struct(png_ptr);
 			if (!info_ptr) {
 				png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+				fclose(infile);
+				fprintf(stderr, "Internal error (png_create_info_struct)\n");
+				return 1;
 			} else {
 				// Passed all tests
 				png_init_io(png_ptr, infile);
@@ -187,36 +196,82 @@ int main(int argc, char **argv)
 				png_read_info(png_ptr, info_ptr);
 				unsigned int color_type = png_get_color_type(png_ptr, info_ptr);
 				unsigned int bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+				png_set_strip_16(png_ptr);
 
-				// Test for correct image type
-				if (bit_depth == 8 && color_type & PNG_COLOR_TYPE_RGB) {
-					// Strip alpha channel if present
-					if (color_type & PNG_COLOR_MASK_ALPHA)
-						png_set_strip_alpha(png_ptr);
+				// Do transformations
+				int need_bg = 0;
+				int need_conv = 0;
+				switch(color_type) {
+					case PNG_COLOR_TYPE_GRAY:
+					{
+						if (bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png_ptr);
+						if (bit_depth == 16) png_set_strip_16(png_ptr);
+						break;
+					}
 
-					// Convert to grayscale :^)
-					png_set_rgb_to_gray_fixed(png_ptr, 1, -1, -1);
+					case PNG_COLOR_TYPE_GRAY_ALPHA:
+					{
+						if (bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png_ptr);
+						if (bit_depth == 16) png_set_strip_16(png_ptr);
+						if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))
+							png_set_tRNS_to_alpha(png_ptr);
+						need_bg = 1;
+						break;
+					}
 
-					// Test for errors in the conversion
-					if (!png_get_rgb_to_gray_status(png_ptr)) {
-						png_read_update_info(png_ptr, info_ptr);
+					case PNG_COLOR_TYPE_RGB:
+						need_conv = 1;
+						break;
 
-						// Get image data (post-transforms)
-						unsigned int img_width = png_get_image_width(png_ptr, info_ptr);
-						unsigned int img_height = png_get_image_height(png_ptr, info_ptr);
-						unsigned int num_comp = png_get_rowbytes(png_ptr, info_ptr);
+					case PNG_COLOR_TYPE_RGBA:
+					{
+						need_conv = 1;
+						need_bg = 1;
+						break;
+					}
 
-						// Create arrays
-						image = img_init(img_width, img_height);
-
-						// Read image
-						png_read_image(png_ptr, image->pixels);
-
-						// Clean-up PNG process
-						png_read_end(png_ptr, NULL);
-						png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+					case PNG_COLOR_TYPE_PALETTE:
+					{
+						png_set_palette_to_rgb(png_ptr);
+						if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
+							png_set_tRNS_to_alpha(png_ptr);
+							need_bg = 1;
+						}
+						need_conv = 1;
+						break;
 					}
 				}
+
+				// Overlay image on white background
+				// FIXME: Transparent pixels not converted to white
+				png_color_16 bg;
+				png_color_16p img_bg;
+				bg.red = 0xFF;
+				bg.green = 0xFF;
+				bg.blue = 0xFF;
+				if (png_get_bKGD(png_ptr, info_ptr, &img_bg)) {
+    				png_set_background(png_ptr, img_bg, PNG_BACKGROUND_GAMMA_FILE, 1, 1.0);
+				} else if (need_bg) {
+					png_set_background(png_ptr, &bg, PNG_BACKGROUND_GAMMA_SCREEN, 0, 1.0);
+				}
+
+				// Convert to grayscale
+				if (need_conv) png_set_rgb_to_gray_fixed(png_ptr, 1, -1, -1);
+
+				// Get image data (post-transforms)
+				png_read_update_info(png_ptr, info_ptr);
+				unsigned int img_width = png_get_image_width(png_ptr, info_ptr);
+				unsigned int img_height = png_get_image_height(png_ptr, info_ptr);
+
+				// Create image
+				image = img_init(img_width, img_height);
+
+				// Read image
+				png_read_image(png_ptr, image->pixels);
+
+				// Clean-up PNG process
+				png_read_end(png_ptr, NULL);
+				png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 			}
 		}
 	}
