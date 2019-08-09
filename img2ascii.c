@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
+#include <locale.h>
 #include "png.h"
 #include "jpeglib.h"
 
@@ -89,25 +91,28 @@ int ends_with(const char *str, const char *end)
 }
 
 /* Converts a grayscale pixel value to shading character.
- * TODO: Improve shading accuracy
  * \param b The pixel value in range [0-255]
  * \return Appropriate shading character
 */
-char get_shade(BYTE b)
+wchar_t get_shade(BYTE b)
 {
-	if (0 <= b && b < 50) {
-		return '#';
-	} else if (50 <= b && b < 100) {
-		return 'm';
-	} else if (100 <= b && b < 200) {
-		return 'o';
+	if (0 <= b && b < 51) {
+		return L'█';
+	} else if (51 <= b && b < 102) {
+		return L'▓';
+	} else if (102 <= b && b < 153) {
+		return L'▒';
+	} else if (153 <= b && b < 204) {
+		return L'░';
 	} else {
-		return ' ';
+		return L' ';
 	}
 }
 
 int main(int argc, char **argv)
 {
+	setlocale(LC_ALL, "C.UTF-8");
+
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
 		return 1;
@@ -288,10 +293,10 @@ int main(int argc, char **argv)
 	// Convert grayscale values to characters
 	for (int y = 0; y < image->height; ++y) {
 		for (int x = 0; x < image->width; ++x) {
-			char c = get_shade(image->pixels[y][x]);
-			fprintf(outfile, "%c", c); // Write to output
+			wchar_t c = get_shade(image->pixels[y][x]);
+			fputwc(c, outfile); // Write to output
 		}
-		fprintf(outfile, "\n");
+		fputwc(L'\n', outfile);
 	}
 
 	fclose(outfile);
