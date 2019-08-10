@@ -133,7 +133,7 @@ int convolve(int kernel[3][3], IMG *img, int x, int y)
  * an edge or a value [1-255] that is a percentage to be multiplied with 2*PI
  * to obtain the gradient at that pixel. Note that the range is actually between
  * [0-254] as 0 is reserved for non-edge pixels.
- * e.g. A value of 127 means: [(127 - 1)/254] * 2 * PI = 3.129 rad (or 179.3 deg)
+ * e.g. A value of 127 means: [(127 - 1)/254] * 2 * PI = 3.116 rad (or 178.53 deg)
  * \param img The supplied image
  * \return The edge map produced
 */
@@ -161,7 +161,7 @@ IMG *sobel(IMG *img)
 			if (mag > thresh) {
 				double dir = atan2(sy, sx);
 				if (dir < 0) dir += 2 * PI;
-				map->pixels[y][x] = (BYTE) round((dir * 254) / (2 * PI));
+				map->pixels[y][x] = (BYTE) round((dir * 254) / (2 * PI)) + 1;
 			}
 		}
 	}
