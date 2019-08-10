@@ -1,14 +1,13 @@
-/* TODO:
- * Use edge detection to place characters like `, ', -, /, |, etc.
- * It should add more definition to the output.
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 #include <locale.h>
+#include <math.h>
 #include "png.h"
 #include "jpeglib.h"
+
+#define PI 3.14159265
 
 typedef unsigned char BYTE;
 
@@ -107,6 +106,67 @@ wchar_t get_shade(BYTE b)
 	} else {
 		return L' ';
 	}
+}
+
+/* Helper function that performs convolsion between the kernels and pixels.
+ * \param kernel 2D array of weights
+ * \param img The pixel data
+ * \param x Horizontal coordinate on the image
+ * \param y Vertical coordinate on the image
+ * \return The resulting sum of the convolsion
+*/
+int convolve(int kernel[3][3], IMG *img, int x, int y)
+{
+	int sum = 0;
+	for (int ky = -1; ky < 2; ++ky) {
+		for (int kx = -1; kx < 2; ++kx) {
+			int px = (x + kx < 0 || x + kx >= img->width ? x : x + kx);
+			int py = (y + ky < 0 || y + ky >= img->height ? y : y + ky);
+			sum += img->pixels[py][px] * kernel[ky + 1][kx + 1];
+		}
+	}
+	return sum;
+}
+
+/* Applies a Sobel filter on the given image and returns the edge map.
+ * Each pixel on the map either has a value of 0 if the pixel isn't part of
+ * an edge or a value [1-255] that is a percentage to be multiplied with 2*PI
+ * to obtain the gradient at that pixel. Note that the range is actually between
+ * [0-254] as 0 is reserved for non-edge pixels.
+ * e.g. A value of 127 means: [(127 - 1)/254] * 2 * PI = 3.129 rad (or 179.3 deg)
+ * \param img The supplied image
+ * \return The edge map produced
+*/
+IMG *sobel(IMG *img)
+{
+	int Gx[3][3] =
+	{
+		{-1, 0, 1},
+		{-2, 0, 2},
+		{-1, 0, 1}
+	};
+	int Gy[3][3] =
+	{
+		{-1, -2, -1},
+		{0, 0, 0},
+		{1, 2, 1}
+	};
+	double thresh = 120.0; // TODO: Determine thresh using image histogram instead.
+
+	IMG *map = img_init(img->width, img->height);	for (int y = 0; y < img->height; ++y) {
+		for (int x = 0; x < img->width; ++x) {
+			int sx = convolve(Gx, img, x, y);
+			int sy = convolve(Gy, img, x, y);
+			double mag = sqrt(pow(sx, 2) + pow(sy, 2));
+			if (mag > thresh) {
+				double dir = atan2(sy, sx);
+				if (dir < 0) dir += 2 * PI;
+				map->pixels[y][x] = (BYTE) round((dir * 254) / (2 * PI));
+			}
+		}
+	}
+
+	return map;
 }
 
 int main(int argc, char **argv)
@@ -290,16 +350,26 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	// Create edge map
+	IMG *edgemap = sobel(image);
+
 	// Convert grayscale values to characters
 	for (int y = 0; y < image->height; ++y) {
 		for (int x = 0; x < image->width; ++x) {
-			wchar_t c = get_shade(image->pixels[y][x]);
-			fputwc(c, outfile); // Write to output
+			if (edgemap->pixels[y][x] > 0) {
+				double angle = ((double) (edgemap->pixels[y][x] - 1) / 254.0) * 2.0 * PI;
+				wchar_t c = L"-/|\\"[(int) round(angle / (PI / 4)) % 4];
+				fputwc(c, outfile);
+			} else {
+				wchar_t c = get_shade(image->pixels[y][x]);
+				fputwc(c, outfile); // Write to output
+			}
 		}
 		fputwc(L'\n', outfile);
 	}
 
 	fclose(outfile);
 	img_destroy(image);
+	img_destroy(edgemap);
 	return 0;
 }
