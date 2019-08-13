@@ -10,10 +10,11 @@
 #define PI 3.14159265
 
 typedef unsigned char BYTE;
+typedef unsigned int uint;
 
 typedef struct {
 	BYTE **pixels;
-	unsigned int width, height;
+	uint width, height;
 } IMG;
 
 /* Frees the memory allocated for an image.
@@ -32,17 +33,20 @@ void img_destroy(IMG *img)
  * \param h Image height
  * \return Pointer to the struct, NULL on failure.
 */
-IMG *img_init(unsigned int w, unsigned int h)
+IMG *img_init(uint w, uint h)
 {
 	IMG *img = (IMG *) malloc(sizeof(IMG));
-	if (img == NULL)
+	if (img == NULL) {
+		fprintf(stderr, "Not enough memory\n");
 		return NULL;
+	}
 
 	img->width = w;
 	img->height = h;
 
 	img->pixels = (BYTE **) malloc(sizeof(BYTE *) * h);
 	if (img->pixels == NULL) {
+		fprintf(stderr, "Not enough memory\n");
 		free(img);
 		return NULL;
 	}
@@ -50,6 +54,7 @@ IMG *img_init(unsigned int w, unsigned int h)
 	for (int row = 0; row < h; ++row) {
 		img->pixels[row] = (BYTE *) calloc(w, sizeof(BYTE));
 		if (img->pixels[row] == NULL) {
+			fprintf(stderr, "Not enough memory\n");
 			img_destroy(img);
 			return NULL;
 		}
@@ -108,6 +113,85 @@ wchar_t get_shade(BYTE b)
 	}
 }
 
+/* Calculates the image histogram.
+ * The returned array is dynamically allocated and must be free'd by the caller.
+ * \param img The grayscale image
+ * \return Array of length 256 where indexes correspond to a gray values & contain the pixel count, NULL on error.
+*/
+uint *hist(IMG *img)
+{
+	uint *arr = (uint *) calloc(256, sizeof(uint));
+	if (arr == NULL) {
+		fprintf(stderr, "Not enough memory\n");
+		return NULL;
+	}
+
+	for (int y = 0; y < img->height; ++y) {
+		for (int x = 0; x < img->width; ++x) {
+			BYTE v = img->pixels[y][x];
+			++arr[v];
+		}
+	}
+	return arr;
+}
+
+/* Calculates the image contrast, that is, the number of disctinct pixel values in the image.
+ * \param img The grayscale image
+ * \return The final tally of unique pixel values, 0 on error
+*/
+uint contrast(IMG *img)
+{
+	uint *h = hist(img);
+	if (h == NULL) return 0;
+
+	uint c = 0;
+	for (int i = 0; i < 256; ++i)
+		if (h[i] > 0) ++c;
+	free(h);
+	return c;
+}
+
+/* Calculates the pixel value at the image's upper quartile (Q3).
+ * \param img The grayscale image
+ * \return The pixel value, 0 on error
+*/
+double upper_q(IMG *img)
+{
+	uint *h = hist(img);
+	if (h == NULL) return 0;
+
+	uint n = contrast(img);
+	if (n == 0) return 0;
+
+	double q = (3.0 / 4.0) * (n + 1);
+	double ret = 0;
+
+	if (q - floor(q) > 0) { // Upper quartile between two numbers
+		int c = 0;
+		double hi = ceil(q);
+		double lo = floor(q);
+		for (int i = 0; i < 256; ++i) {
+			if (h[i] > 0) {
+				++c;
+				if (c == hi || c == lo) ret += i;
+				if (c >= hi) break;
+			}
+		}
+		ret /= 2;
+	} else {
+		int c = 0;
+		for (int i = 0; i < 256; ++i) {
+			if (h[i] > 0) {
+				++c;
+				if (c == q) ret = i;
+			}
+		}
+	}
+
+	free(h);
+	return ret;
+}
+
 /* Helper function that performs convolsion between the kernels and pixels.
  * \param kernel 2D array of weights
  * \param img The pixel data
@@ -135,8 +219,9 @@ int convolve(int kernel[3][3], IMG *img, int x, int y)
  * [0-254] as 0 is reserved for non-edge pixels.
  * e.g. A value of 127 means: [(127 - 1)/254] * 2 * PI = 3.116 rad (or 178.53 deg)
  * \param img The supplied image
- * \return The edge map produced
+ * \return The edge map produced, NULL on error
 */
+double g_thresh = 0;
 IMG *sobel(IMG *img)
 {
 	int Gx[3][3] =
@@ -151,9 +236,11 @@ IMG *sobel(IMG *img)
 		{0, 0, 0},
 		{1, 2, 1}
 	};
-	double thresh = 120.0; // TODO: Determine thresh using image histogram instead.
+	double thresh = (g_thresh > 0 ? g_thresh : upper_q(img));
+	IMG *map = img_init(img->width, img->height);
+	if (map == NULL || thresh == 0) return NULL;
 
-	IMG *map = img_init(img->width, img->height);	for (int y = 0; y < img->height; ++y) {
+	for (int y = 0; y < img->height; ++y) {
 		for (int x = 0; x < img->width; ++x) {
 			int sx = convolve(Gx, img, x, y);
 			int sy = convolve(Gy, img, x, y);
@@ -173,9 +260,23 @@ int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, "C.UTF-8");
 
-	if (argc < 2) {
-		fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
+	if (argc < 2 || argc > 3) {
+		fprintf(stderr, "Usage: %s <filename> [threshold]\n", argv[0]);
 		return 1;
+	}
+
+	if (argc == 3) {
+		if (!strcmp(argv[2], "INF")) {
+			g_thresh = -1;
+		} else {
+			double temp = atof(argv[2]);
+			if (temp <= 0) {
+				fprintf(stderr, "Threshold must either be a non-zero decimal or INF (no edge detection)\n");
+				return 1;
+			} else {
+				g_thresh = temp;
+			}
+		}
 	}
 
 	// Validate file format
@@ -208,12 +309,23 @@ int main(int argc, char **argv)
 		jpeg_start_decompress(&cinfo);
 
 		// Get image data
-		unsigned int img_width = cinfo.output_width;
-		unsigned int img_height = cinfo.output_height;
+		uint img_width = cinfo.output_width;
+		uint img_height = cinfo.output_height;
 
 		// Create arrays
 		JSAMPARRAY scanline = (JSAMPARRAY) malloc(sizeof(JSAMPROW)); // Temp array for scanlines
+		if (scanline == NULL) {
+			fprintf(stderr, "Not enough memory\n");
+			jpeg_abort_decompress(&cinfo);
+			return 1;
+		}
 		*scanline = (JSAMPROW) malloc(sizeof(JSAMPLE) * img_width * cinfo.output_components);
+		if (*scanline == NULL) {
+			fprintf(stderr, "Not enough memory\n");
+			free(scanline);
+			jpeg_abort_decompress(&cinfo);
+			return 1;
+		}
 		image = img_init(img_width, img_height); // Final grayscale image
 
 		// Read scanlines & convert to grayscale
@@ -259,8 +371,8 @@ int main(int argc, char **argv)
 
 				// Get image data
 				png_read_info(png_ptr, info_ptr);
-				unsigned int color_type = png_get_color_type(png_ptr, info_ptr);
-				unsigned int bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+				uint color_type = png_get_color_type(png_ptr, info_ptr);
+				uint bit_depth = png_get_bit_depth(png_ptr, info_ptr);
 				png_set_strip_16(png_ptr);
 
 				// Do transformations
@@ -325,8 +437,8 @@ int main(int argc, char **argv)
 
 				// Get image data (post-transforms)
 				png_read_update_info(png_ptr, info_ptr);
-				unsigned int img_width = png_get_image_width(png_ptr, info_ptr);
-				unsigned int img_height = png_get_image_height(png_ptr, info_ptr);
+				uint img_width = png_get_image_width(png_ptr, info_ptr);
+				uint img_height = png_get_image_height(png_ptr, info_ptr);
 
 				// Create image
 				image = img_init(img_width, img_height);
@@ -351,12 +463,12 @@ int main(int argc, char **argv)
 	}
 
 	// Create edge map
-	IMG *edgemap = sobel(image);
+	IMG *edgemap = (g_thresh >= 0 ? sobel(image) : NULL);
 
 	// Convert grayscale values to characters
 	for (int y = 0; y < image->height; ++y) {
 		for (int x = 0; x < image->width; ++x) {
-			if (edgemap->pixels[y][x] > 0) {
+			if (edgemap != NULL && edgemap->pixels[y][x] > 0) {
 				double angle = ((double) (edgemap->pixels[y][x] - 1) / 254.0) * 2.0 * PI;
 				wchar_t c = L"-/|\\"[(int) round(angle / (PI / 4)) % 4];
 				fputwc(c, outfile);
