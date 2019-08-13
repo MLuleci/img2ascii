@@ -22,6 +22,7 @@ typedef struct {
 */
 void img_destroy(IMG *img)
 {
+	if (img == NULL) return;
 	for (int row = 0; row < img->height; ++row)
 		free(img->pixels[row]);
 	free(img->pixels);
@@ -319,18 +320,21 @@ int main(int argc, char **argv)
 		JSAMPARRAY scanline = (JSAMPARRAY) malloc(sizeof(JSAMPROW)); // Temp array for scanlines
 		if (scanline == NULL) {
 			fprintf(stderr, "Not enough memory\n");
+			fclose(infile);
 			jpeg_abort_decompress(&cinfo);
 			return 1;
 		}
 		*scanline = (JSAMPROW) malloc(sizeof(JSAMPLE) * img_width * cinfo.output_components);
 		if (*scanline == NULL) {
 			fprintf(stderr, "Not enough memory\n");
+			fclose(infile);
 			free(scanline);
 			jpeg_abort_decompress(&cinfo);
 			return 1;
 		}
 		image = img_init(img_width, img_height); // Final grayscale image
 		if (image == NULL) {
+			fclose(infile);
 			jpeg_abort_decompress(&cinfo);
 			free(*scanline);
 			free(scanline);
@@ -452,6 +456,7 @@ int main(int argc, char **argv)
 				// Create image
 				image = img_init(img_width, img_height);
 				if (image == NULL) {
+					fclose(infile);
 					png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 					return 1;
 				}
