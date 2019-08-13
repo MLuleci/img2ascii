@@ -327,6 +327,12 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		image = img_init(img_width, img_height); // Final grayscale image
+		if (image == NULL) {
+			jpeg_abort_decompress(&cinfo);
+			free(*scanline);
+			free(scanline);
+			return 1;
+		}
 
 		// Read scanlines & convert to grayscale
 		int y = 0;
@@ -442,6 +448,10 @@ int main(int argc, char **argv)
 
 				// Create image
 				image = img_init(img_width, img_height);
+				if (image == NULL) {
+					png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+					return 1;
+				}
 
 				// Read image
 				png_read_image(png_ptr, image->pixels);
