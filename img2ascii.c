@@ -157,11 +157,11 @@ uint contrast(IMG *img)
 */
 double upper_q(IMG *img)
 {
-	uint *h = hist(img);
-	if (h == NULL) return 0;
-
 	uint n = contrast(img);
 	if (n == 0) return 0;
+
+	uint *h = hist(img);
+	if (h == NULL) return 0;
 
 	double q = (3.0 / 4.0) * (n + 1);
 	double ret = 0;
@@ -238,7 +238,10 @@ IMG *sobel(IMG *img)
 	};
 	double thresh = (g_thresh > 0 ? g_thresh : upper_q(img));
 	IMG *map = img_init(img->width, img->height);
-	if (map == NULL || thresh == 0) return NULL;
+	if (map == NULL || thresh == 0) {
+		free(map);
+		return NULL;
+	}
 
 	for (int y = 0; y < img->height; ++y) {
 		for (int x = 0; x < img->width; ++x) {
