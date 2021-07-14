@@ -331,7 +331,7 @@ private:
      */
     void check(uint_t x, uint_t y) const
     {
-        if (x >= _w || y >= _h || x < 0 || y < 0)
+        if (x >= _w || y >= _h)
             throw std::out_of_range("Indices out of range");
     }
 
