@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <stdexcept>
+#include <iterator>
 #include <cstdlib>
 #include <sstream>
 #include <utility>
@@ -44,6 +45,15 @@ T sum(std::array<T, N> A)
 
 class Image
 {
+    byte_t** alloc(uint_t w, uint_t h)
+    {
+        byte_t** p;
+        
+        p = new byte_t*[h];
+        for (uint_t i = 0; i < h; ++i)
+            p[i] = new byte_t[w];
+        return p;
+    }
 public:
     /** 
      * Default constructor
@@ -57,7 +67,7 @@ public:
         , _h(h)
     {
         if (_w && _h) {
-            _data = new byte_t[_w * _h] { v };
+            _data = alloc(_w, _h);
             if (!_data)
                 throw std::bad_alloc();
         }
@@ -88,6 +98,8 @@ public:
      */
     ~Image()
     {
+        for (uint_t i = 0; i < _h; ++i)
+            delete [] _data[i];
         delete [] _data;
     }
 
@@ -130,7 +142,8 @@ public:
             // Allocate memory
             JSAMPLE* line;
             line = new JSAMPLE[_w * cinfo.output_components];
-            _data = new byte_t[_w * _h];
+            //_data = new byte_t[_w * _h];
+            _data = alloc(_w, _h);
 
             if (!line || !_data) {
                 fclose(in);
@@ -251,14 +264,15 @@ public:
                     _h = png_get_image_height(png_ptr, info_ptr);
 
                     // Create image
-                    _data = new byte_t[_w * _h];
+                    //_data = new byte_t[_w * _h];
+                    _data = alloc(_w, _h);
                     if (!_data) {
                         fclose(in);
                         throw std::bad_alloc();
                     }
 
                     // FIXME: Read image
-                    png_read_image(png_ptr, &_data);
+                    png_read_image(png_ptr, _data);
 
                     // Clean-up PNG process
                     png_read_end(png_ptr, NULL);
@@ -275,13 +289,12 @@ public:
      * @param x
      * @param y
      * @param v byte value
-     * @return previous byte value
      * @throws out_of_range for invalid indices
      */
-    byte_t set(uint_t x, uint_t y, byte_t v)
+    void set(uint_t x, uint_t y, byte_t v)
     {
         check(x, y);
-        return std::exchange(_data[_w * y + x], v);
+        _data[y][x] = v;
     }
 
     /**
@@ -291,10 +304,10 @@ public:
      * @return byte value
      * @throws out_of_range for invalid indices
      */
-    byte_t get(uint_t x, uint_t y) const
+    byte_t& get(uint_t x, uint_t y) const
     {
         check(x, y);
-        return _data[_w * y + x];
+        return _data[y][x];
     }
 
     /**
@@ -311,16 +324,103 @@ public:
      * @return number of pixels
      */
     uint_t size() const { return _w * _h; }
+    
+    /**
+     * Iterator for Image class.
+     * LegacyInputIterator must satisfy:
+     * - Copy constructable
+     * - Copy assignable
+     * - Destructable
+     * - Swappable
+     * - std::iterator_traits<Iterator>
+     *   - value_type
+     *   - difference_type
+     *   - reference
+     *   - pointer
+     *   - iterator_category
+     * - (In)equality comparable
+     * - Incrementable (postfix & prefix)
+     * - (De)referencable
+     * - Member of pointer (NOT IMPLEMENTED)
+     * 
+     * Defines a left-to-right, top-to-bottom
+     * progression through image.
+     */
+    class Iterator
+    {
+    public:
+        Iterator(const Image* i, uint_t x = 0, uint_t y = 0)
+            : _im(i)
+            , _x(x)
+            , _y(y)
+        {};
+        Iterator(const Iterator&) = default;
+        Iterator& operator=(const Iterator&) = default;
+        ~Iterator() = default;
+
+        void swap(Iterator& o)
+        {
+            std::swap(_x, o._x);
+            std::swap(_y, o._y);
+            std::swap(_im, o._im);
+        }
+
+        typedef byte_t value_type;
+        typedef size_t difference_type ;
+        typedef byte_t& reference ;
+        typedef byte_t* pointer ;
+        typedef std::input_iterator_tag iterator_category;
+        
+        Iterator& operator++()
+        {
+            if (++_x >= _im->width()) {
+                _x = 0;
+                ++_y;
+            }
+            return *this;
+        }
+
+        Iterator operator++(int)
+        {
+            auto tmp = *this;
+            operator++();
+            return tmp;
+        }
+
+        byte_t& operator*()
+        {
+            return _im->get(_x, _y);
+        }
+
+        bool operator ==(const Iterator& o) const
+        {
+            return _im == o._im 
+                && _x == o._x 
+                && _y == o._y;
+        }
+
+        bool operator !=(const Iterator& o) const
+        {
+            return !(*this == o);
+        }
+    private:
+        const Image* _im;
+        uint_t _x, _y;
+    };
 
     /**
      * @return beginning of data
      */
-    byte_t* begin() const { return _data; }
+    Iterator begin() const { return Iterator(this); }
 
     /**
+     * Notice iterator's _x is set to zero, because
+     * that's what'll happen when it is incremented
+     * past the last row.
+     *
      * @return end of data
      */
-    byte_t* end() const { return _data + (_w * _h); }
+    Iterator end() const { return Iterator(this, 0, _h); }
 
 private:
     /**
@@ -335,9 +435,14 @@ private:
             throw std::out_of_range("Indices out of range");
     }
 
-    byte_t* _data;
+    byte_t** _data;
     uint_t _w, _h;
 };
+
+void swap(Image::Iterator& i, Image::Iterator& j)
+{
+    i.swap(j);
+}
 
 /**
  * Calcualte image histogram
@@ -452,26 +557,4 @@ std::string ascii(const Image& im)
     }
 
     return s;
-}
-
-/**
- * Show a nice histogram. 
- * @param im input image
- */
-void dump(const Image& im)
-{
-    auto h = hist(im);
-    byte_t m = *std::max_element(h.begin(), h.end());
-    Image t(255, m);
-    for (uint_t x = 0; x < 256; ++x)
-    {
-        byte_t v = h[x];
-        for (uint_t y = 0; y < v; ++y)
-            t.set(x, y, 1);
-    }
-    std::string s(ascii(t));
-    printf("(%u x %u):\n%s\n",
-            im.width(), 
-            im.height(), 
-            s.c_str());
 }
