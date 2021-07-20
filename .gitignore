@@ -3,4 +3,5 @@
 *.png
 *.out
 *.txt
+i2a
 .buildconfig

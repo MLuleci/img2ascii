@@ -1,10 +1,9 @@
-CC = gcc
-OFILE = img2ascii.out
-IFILE = img2ascii.c
-LIBS = -ljpeg -lpng -lm
+FLAGS = -ljpeg -lpng -lm -g -Wall
+SRC = $(wildcard *.cc)
 
-$(OFILE) : $(IFILE)
-	$(CC) -g -o $(OFILE) $(IFILE) $(LIBS)
+i2a : $(SRC)
+	$(CXX) -o $@ $^ $(FLAGS)
 
+.PHONY: clean
 clean :
-	rm $(OFILE)
+	rm -f i2a *.o
