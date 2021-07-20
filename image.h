@@ -344,11 +344,11 @@ private:
  * @param im input image
  * @return histogram array
  */
-std::array<byte_t, 255> hist(const Image& im)
+std::array<uint_t, 255> hist(const Image& im)
 {
-    std::array<byte_t, 255> H { 0 };
+    std::array<uint_t, 255> H { 0 };
     for (byte_t b : im)
-        H[b]++;
+        H[(uint_t)b]++;
     return H;
 }
 
@@ -428,12 +428,12 @@ std::string ascii(const Image& im)
     // Pre-allocate string
     w = ceil(om.width() / 2) + 1;
     h = ceil(om.height() / 3);
-    s.reserve(w * h);
+    s.reserve(w * h * 3);
 
     // Lump together groups of 2x3 pixels
     for (size_t y = 0; y < om.height() - 2; y += 3)
     {
-        for (size_t x = 0; x < om.width() - 2; x += 2)
+        for (size_t x = 0; x < om.width() - 1; x += 2)
         {
             byte_t b = om.get(x, y)
                      | om.get(x, y + 1) << 1
@@ -452,4 +452,26 @@ std::string ascii(const Image& im)
     }
 
     return s;
+}
+
+/**
+ * Show a nice histogram. 
+ * @param im input image
+ */
+void dump(const Image& im)
+{
+    auto h = hist(im);
+    byte_t m = *std::max_element(h.begin(), h.end());
+    Image t(255, m);
+    for (uint_t x = 0; x < 256; ++x)
+    {
+        byte_t v = h[x];
+        for (uint_t y = 0; y < v; ++y)
+            t.set(x, y, 1);
+    }
+    std::string s(ascii(t));
+    printf("(%u x %u):\n%s\n",
+            im.width(), 
+            im.height(), 
+            s.c_str());
 }
